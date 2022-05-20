@@ -3,15 +3,14 @@
 This program lets you do archive slack channels which are no longer active.
 """
 
-# standard imports
 from datetime import datetime
 import os
 import sys
 import time
 import json
 
-# not standard imports
 import requests
+
 from config import get_channel_reaper_settings
 from utils import get_logger
 
@@ -43,33 +42,19 @@ class ChannelReaper:
         return list(keywords)
 
     def get_channel_alerts(self):
-        """Get the alert message which is used to notify users in a channel of archival. """
-        archive_msg = """
-This channel has had no activity for %d days. It is being auto-archived.
-If you feel this is a mistake you can <https://get.slack.help/hc/en-us/articles/201563847-Archive-a-channel#unarchive-a-channel|unarchive this channel>.
-This will bring it back at any point. In the future, you can add '%%noarchive' to your channel topic or purpose to avoid being archived.
-This script was run from this repo: https://github.com/Symantec/slack-autoarchive
-""" % self.settings.get(
-            "days_inactive"
-        )
-        alerts = {"channel_template": archive_msg}
-        if os.path.isfile("templates.json"):
-            with open("templates.json") as filecontent:
-                alerts = json.load(filecontent)
+        """Get the alert message which is used to notify users in a channel of archival."""
+        with open("templates.json") as filecontent:
+            alerts = json.load(filecontent)
         return alerts
 
-    # pylint: disable=too-many-arguments
     def slack_api_http(
         self,
         api_endpoint=None,
         payload=None,
         method="GET",
-        # pylint: disable=unused-argument
-        retry=True,
         retry_delay=0,
     ):
-        """ Helper function to query the slack api and handle errors and rate limit. """
-        # pylint: disable=no-member
+        """Helper function to query the slack api and handle errors and rate limit."""
         uri = "https://slack.com/api/" + api_endpoint
         token = self.settings.get("slack_token")
         headers = {
@@ -110,9 +95,13 @@ This script was run from this repo: https://github.com/Symantec/slack-autoarchiv
         return None
 
     def get_all_channels(self):
-        """ Get a list of all non-archived channels from slack channels.list. """
-        payload = {"exclude_archived": 1}
-        api_endpoint = "channels.list"
+        """Get a list of all non-archived channels from slack channels.list."""
+        # TODO: Add support for more than 1000 channels.
+        payload = {
+            "exclude_archived": 1,
+            "limit": 1000,
+        }
+        api_endpoint = "conversations.list"
         channels = self.slack_api_http(api_endpoint=api_endpoint, payload=payload)[
             "channels"
         ]
@@ -129,7 +118,7 @@ This script was run from this repo: https://github.com/Symantec/slack-autoarchiv
         return all_channels
 
     def get_last_message_timestamp(self, channel_history, too_old_datetime):
-        """ Get the last message from a slack channel, and return the time. """
+        """Get the last message from a slack channel, and return the time."""
         last_message_datetime = too_old_datetime
         last_bot_message_datetime = too_old_datetime
 
@@ -153,10 +142,10 @@ This script was run from this repo: https://github.com/Symantec/slack-autoarchiv
         return (last_message_datetime, True)
 
     def is_channel_disused(self, channel, too_old_datetime):
-        """ Return True or False depending on if a channel is "active" or not.  """
+        """Return True or False depending on if a channel is "active" or not."""
         num_members = channel["num_members"]
         payload = {"inclusive": 0, "oldest": 0, "count": 50}
-        api_endpoint = "channels.history"
+        api_endpoint = "conversations.history"
 
         payload["channel"] = channel["id"]
         channel_history = self.slack_api_http(
@@ -176,12 +165,12 @@ This script was run from this repo: https://github.com/Symantec/slack-autoarchiv
 
     # If you add channels to the WHITELIST_KEYWORDS constant they will be exempt from archiving.
     def is_channel_whitelisted(self, channel, white_listed_channels):
-        """ Return True or False depending on if a channel is exempt from being archived. """
+        """Return True or False depending on if a channel is exempt from being archived."""
         # self.settings.get('skip_channel_str')
         # if the channel purpose contains the string self.settings.get('skip_channel_str'), we'll skip it.
         info_payload = {"channel": channel["id"]}
         channel_info = self.slack_api_http(
-            api_endpoint="channels.info", payload=info_payload, method="GET"
+            api_endpoint="conversations.info", payload=info_payload, method="GET"
         )
         channel_purpose = channel_info["channel"]["purpose"]["value"]
         channel_topic = channel_info["channel"]["topic"]["value"]
@@ -199,7 +188,7 @@ This script was run from this repo: https://github.com/Symantec/slack-autoarchiv
         return False
 
     def send_channel_message(self, channel_id, message):
-        """ Send a message to a channel or user. """
+        """Send a message to a channel or user."""
         payload = {
             "channel": channel_id,
             "username": "channel_reaper",
@@ -210,8 +199,8 @@ This script was run from this repo: https://github.com/Symantec/slack-autoarchiv
         self.slack_api_http(api_endpoint=api_endpoint, payload=payload, method="POST")
 
     def archive_channel(self, channel, alert):
-        """ Archive a channel, and send alert to slack admins. """
-        api_endpoint = "channels.archive"
+        """Archive a channel, and send alert to slack admins."""
+        api_endpoint = "conversations.archive"
         stdout_message = "Archiving channel... %s" % channel["name"]
         self.logger.info(stdout_message)
 
@@ -223,7 +212,7 @@ This script was run from this repo: https://github.com/Symantec/slack-autoarchiv
             self.logger.info(stdout_message)
 
     def send_admin_report(self, channels):
-        """ Optionally this will message admins with which channels were archived. """
+        """Optionally this will message admins with which channels were archived."""
         if self.settings.get("admin_channel"):
             channel_names = ", ".join("#" + channel["name"] for channel in channels)
             admin_msg = "Archiving %d channels: %s" % (len(channels), channel_names)
