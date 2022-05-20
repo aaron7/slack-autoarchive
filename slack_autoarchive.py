@@ -53,10 +53,11 @@ class ChannelReaper:
         payload=None,
         method="GET",
         retry_delay=0,
+        as_bot=False,
     ):
         """Helper function to query the slack api and handle errors and rate limit."""
         uri = "https://slack.com/api/" + api_endpoint
-        token = self.settings.get("slack_token")
+        token = self.settings.get("bot_slack_token") if as_bot else self.settings.get("slack_token")
         headers = {
             "Authorization": f"Bearer {token}",
         }
@@ -86,10 +87,7 @@ class ChannelReaper:
                 return response.json()
             elif response.status_code == requests.codes.too_many_requests:
                 retry_timeout = float(response.headers["Retry-After"])
-                # pylint: disable=too-many-function-args
-                return self.slack_api_http(
-                    api_endpoint, payload, method, False, retry_timeout
-                )
+                return self.slack_api_http(api_endpoint, payload, method, retry_timeout)
         except Exception as error_msg:
             raise Exception(error_msg)
         return None
@@ -113,6 +111,8 @@ class ChannelReaper:
                     "name": channel["name"],
                     "created": channel["created"],
                     "num_members": channel["num_members"],
+                    "topic": channel["topic"]["value"],
+                    "purpose": channel["purpose"]["value"],
                 }
             )
         return all_channels
@@ -120,6 +120,9 @@ class ChannelReaper:
     def get_last_message_timestamp(self, channel_history, too_old_datetime):
         """Get the last message from a slack channel, and return the time."""
         last_message_datetime = too_old_datetime
+
+        if not channel_history:
+            return datetime.utcfromtimestamp(0)
 
         if "messages" not in channel_history:
             return last_message_datetime  # no messages
@@ -161,13 +164,9 @@ class ChannelReaper:
 
     # If you add channels to the WHITELIST_KEYWORDS constant they will be exempt from archiving.
     def is_channel_whitelisted(self, channel, white_listed_channels):
-        """Return True or False depending on if a channel is exempt from being archived.""".
-        info_payload = {"channel": channel["id"]}
-        channel_info = self.slack_api_http(
-            api_endpoint="conversations.info", payload=info_payload, method="GET"
-        )
-        channel_purpose = channel_info["channel"]["purpose"]["value"]
-        channel_topic = channel_info["channel"]["topic"]["value"]
+        """Return True or False depending on if a channel is exempt from being archived."""
+        channel_purpose = channel["purpose"]
+        channel_topic = channel["topic"]
         if (
             self.settings.get("skip_channel_str") in channel_purpose
             or self.settings.get("skip_channel_str") in channel_topic
@@ -186,11 +185,11 @@ class ChannelReaper:
         payload = {
             "channel": channel_id,
             "username": "Auto Archiver",
-            "icon_emoji": ":ghost:",
+            "icon_emoji": ":wave:",
             "text": message,
         }
         api_endpoint = "chat.postMessage"
-        self.slack_api_http(api_endpoint=api_endpoint, payload=payload, method="POST")
+        self.slack_api_http(api_endpoint=api_endpoint, payload=payload, method="POST", as_bot=True)
 
     def archive_channel(self, channel, alert):
         """Archive a channel, and send alert to slack admins."""
@@ -199,7 +198,7 @@ class ChannelReaper:
         self.logger.info(stdout_message)
 
         if not self.settings.get("dry_run"):
-            channel_message = alert.format(self.settings.get("days_inactive"))
+            channel_message = alert.format(days_inactive=self.settings.get("days_inactive"))
             self.send_channel_message(channel["id"], channel_message)
             payload = {"channel": channel["id"]}
             self.slack_api_http(api_endpoint=api_endpoint, payload=payload)
@@ -213,6 +212,12 @@ class ChannelReaper:
             if self.settings.get("dry_run"):
                 admin_msg = "[DRY RUN] %s" % admin_msg
             self.send_channel_message(self.settings.get("admin_channel"), admin_msg)
+
+    def generate_report(self, channels):
+        """Generate a report. Usual for a dry-run or after a run."""
+        file_name = f'report-{datetime.now().strftime("%m%d%Y%H%M%S")}.txt'
+        with open(file_name, "w") as f:
+            f.write("\n".join(str(channel["name"]) for channel in channels))
 
     def main(self):
         """
@@ -240,6 +245,7 @@ class ChannelReaper:
                 self.archive_channel(channel, alert_templates["channel_template"])
 
         self.send_admin_report(archived_channels)
+        self.generate_report(archived_channels)
 
 
 if __name__ == "__main__":
