@@ -15,6 +15,7 @@ def get_channel_reaper_settings():
         # set MIN_MEMBERS and any channels larger than this in people
         # are exempt from archiving. 0 is no limit.
         "min_members": int(os.environ.get("MIN_MEMBERS", 0)),
+        "ignore_bots": (os.environ.get("IGNORE_BOTS", "false") == "true"),
         "dry_run": (os.environ.get("DRY_RUN", "true") == "true"),
         "slack_token": os.environ.get("SLACK_TOKEN", ""),
         "too_old_datetime": (datetime.now() - timedelta(days=days_inactive)),

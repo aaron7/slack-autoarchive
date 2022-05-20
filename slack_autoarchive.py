@@ -120,10 +120,9 @@ class ChannelReaper:
     def get_last_message_timestamp(self, channel_history, too_old_datetime):
         """Get the last message from a slack channel, and return the time."""
         last_message_datetime = too_old_datetime
-        last_bot_message_datetime = too_old_datetime
 
         if "messages" not in channel_history:
-            return (last_message_datetime, False)  # no messages
+            return last_message_datetime  # no messages
 
         for message in channel_history["messages"]:
             if "subtype" in message and message["subtype"] in self.settings.get(
@@ -132,14 +131,13 @@ class ChannelReaper:
                 continue
             last_message_datetime = datetime.fromtimestamp(float(message["ts"]))
             break
+
         # for folks with the free plan, sometimes there is no last message,
         # then just set last_message_datetime to epoch
         if not last_message_datetime:
-            last_bot_message_datetime = datetime.utcfromtimestamp(0)
-        # return bot message time if there was no user message
-        if too_old_datetime >= last_bot_message_datetime > too_old_datetime:
-            return (last_bot_message_datetime, False)
-        return (last_message_datetime, True)
+            last_message_datetime = datetime.utcfromtimestamp(0)
+
+        return last_message_datetime
 
     def is_channel_disused(self, channel, too_old_datetime):
         """Return True or False depending on if a channel is "active" or not."""
@@ -151,23 +149,19 @@ class ChannelReaper:
         channel_history = self.slack_api_http(
             api_endpoint=api_endpoint, payload=payload
         )
-        (last_message_datetime, is_user) = self.get_last_message_timestamp(
+        last_message_datetime = self.get_last_message_timestamp(
             channel_history, datetime.fromtimestamp(float(channel["created"]))
         )
-        # mark inactive if last message is too old, but don't
-        # if there have been bot messages and the channel has
-        # at least the minimum number of members
+
+        last_message_is_too_old = last_message_datetime <= too_old_datetime
         min_members = self.settings.get("min_members")
         has_min_users = min_members == 0 or min_members > num_members
-        return last_message_datetime <= too_old_datetime and (
-            not is_user or has_min_users
-        )
+
+        return last_message_is_too_old and has_min_users
 
     # If you add channels to the WHITELIST_KEYWORDS constant they will be exempt from archiving.
     def is_channel_whitelisted(self, channel, white_listed_channels):
-        """Return True or False depending on if a channel is exempt from being archived."""
-        # self.settings.get('skip_channel_str')
-        # if the channel purpose contains the string self.settings.get('skip_channel_str'), we'll skip it.
+        """Return True or False depending on if a channel is exempt from being archived.""".
         info_payload = {"channel": channel["id"]}
         channel_info = self.slack_api_http(
             api_endpoint="conversations.info", payload=info_payload, method="GET"
@@ -191,7 +185,7 @@ class ChannelReaper:
         """Send a message to a channel or user."""
         payload = {
             "channel": channel_id,
-            "username": "channel_reaper",
+            "username": "Auto Archiver",
             "icon_emoji": ":ghost:",
             "text": message,
         }
